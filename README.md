@@ -67,7 +67,7 @@ Cascade and Mosaic enabled together, plus 60 other extensions:
 | `forum-theme-ernestdefoe-mosaic.css` | 546,423 | 42 | **0** | 227 |
 
 Every member gets a *smaller* stylesheet than the shared one, with no foreign
-theme rules in it. Every member gets a smaller stylesheet than the shared one, and — because
+theme rules in it — and, because
 themes are compiled whole — a theme that overrides core LESS variables still
 works. Mosaic overrides seven of them, which is why a shared "common" sheet
 plus a per-theme delta is **not** a viable optimisation: the overrides would

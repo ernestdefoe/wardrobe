@@ -36,6 +36,26 @@ Three facts in core make it possible without patching anything:
 3. `RevisionCompiler::getUrl()` commits when there is no revision, so a theme
    nobody has chosen is never compiled.
 
+## Cost
+
+Measured on dev.ernestdefoe.online (rc.8, 60+ extensions, Valkey cache, Horizon):
+
+| | |
+|---|---|
+| Added to a page request | **0.11 ms** p50, 0.16 ms p90 — against a ~70 ms page |
+| Page latency with vs without | 70.2 ms vs 70.4 ms p50 over 50 requests — indistinguishable |
+| Compile, per theme | ~450 ms, off the request path on the queue |
+| Rebuild that changes nothing | revision unchanged, so **no member re-downloads anything** |
+| 20 concurrent requests on a stale theme | **1 compile per theme** (20 without the guard) |
+
+The hot path is all closures — `Assets::css()` appends a callback, `makeCss()`
+defers collection to compile time, `getUrl()` reads a revision — so nothing
+walks the filesystem to render a page. There is deliberately no URL cache on
+top: it would cost more to look up than it saves.
+
+Guests all resolve to the forum default, so guest HTML keeps one stylesheet URL
+and stays cacheable. Per-member choice is for members.
+
 ## Measured on the dev forum
 
 Cascade and Mosaic enabled together, plus 60 other extensions:
@@ -47,8 +67,11 @@ Cascade and Mosaic enabled together, plus 60 other extensions:
 | `forum-theme-ernestdefoe-mosaic.css` | 546,423 | 42 | **0** | 227 |
 
 Every member gets a *smaller* stylesheet than the shared one, with no foreign
-theme rules in it. Cold compile after a cache clear: 1.4s on the first request
-(which also rebuilds `forum.js`); warm requests ~70ms.
+theme rules in it. Every member gets a smaller stylesheet than the shared one, and — because
+themes are compiled whole — a theme that overrides core LESS variables still
+works. Mosaic overrides seven of them, which is why a shared "common" sheet
+plus a per-theme delta is **not** a viable optimisation: the overrides would
+never reach the rules they are meant to change.
 
 ## Not solved yet
 

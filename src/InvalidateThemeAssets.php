@@ -8,7 +8,7 @@ use Illuminate\Contracts\Queue\Queue;
 use Illuminate\Queue\SyncQueue;
 
 /**
- * Marks every per-theme stylesheet stale when core rebuilds the shared one,
+ * Marks every per-theme asset stale when core rebuilds the shared one,
  * and gets them rebuilt in the background if this forum can.
  *
  * 🚨 Without this the theme sheets go stale and stay stale. Core's
@@ -25,17 +25,17 @@ use Illuminate\Queue\SyncQueue;
  * Deleting would hand all of them a new URL and a fresh ~70 KB download for
  * byte-identical CSS.
  */
-class InvalidateThemeStylesheets
+class InvalidateThemeAssets
 {
     public function __construct(
-        private ThemeStylesheets $stylesheets,
+        private ThemeAssets $assets,
         private Queue $queue
     ) {
     }
 
     public function handle(AssetsRecompiled $event): void
     {
-        $this->stylesheets->markStale();
+        $this->assets->markStale();
 
         // 🚨 Never dispatch onto a sync queue. This listener runs inside a
         // member's page request, and a sync dispatch would compile every theme
@@ -49,6 +49,6 @@ class InvalidateThemeStylesheets
             return;
         }
 
-        $this->queue->push(new WarmThemeStylesheets());
+        $this->queue->push(new WarmThemeAssets());
     }
 }

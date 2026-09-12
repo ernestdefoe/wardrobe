@@ -1,64 +1,79 @@
 # Wardrobe
 
-> **Status: spike.** The architecture is proved end to end on dev.ernestdefoe.online
-> (Flarum 2.0.0-rc.8). There is no admin UI, no member-facing picker and no JS
-> yet — configuration is two settings rows and a user preference.
+Install several themes on one **Flarum 2** forum and let every member — and every
+guest — choose the one they see. The thing every other forum platform has had
+for twenty years, and Flarum never has.
 
-Install several themes on one Flarum 2 forum and let every member choose the one
-they see — the thing every other forum platform has had for twenty years.
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Flarum](https://img.shields.io/badge/Flarum-%5E2.0-orange.svg)
+![PHP](https://img.shields.io/badge/PHP-%5E8.3-777bb4.svg)
 
 ## Why Flarum can't do this today
 
-Flarum compiles **every** enabled extension's LESS into a single revisioned
-`forum.css`. Two themes enabled means two themes in one file, fighting.
+Flarum compiles **every** enabled extension's LESS into a single `forum.css`,
+and every extension's JavaScript into a single `forum.js`. Two themes enabled at
+once means two themes fighting in one stylesheet *and* both themes' components
+rendering for everyone — which is why nobody ships this.
 
-Wardrobe compiles that same source list once per theme, each time with every
-*other* theme left out, and swaps the stylesheet link per request.
+Wardrobe compiles those same sources once per theme, each time with every
+*other* theme left out of both bundles, and serves each visitor the pair that
+belongs to their choice. No theme has to be modified, and core is not patched.
+
+## What people see
+
+- **A theme switcher in the header** — one click, for members and guests alike.
+- **A picker in member settings**, next to the other "how it looks to me"
+  settings, with "Use the forum's theme" as its first option.
+- **Admins** tick which installed themes the forum offers, pick the default, and
+  can turn member choice off entirely to hold one look.
+
+A member's choice is stored as a preference, so it follows them between devices.
+A guest's is a cookie, read server-side on the next request — so a guest gets a
+properly themed page, not one repainted after boot.
 
 ## How it works
 
 | Piece | What it does |
 |---|---|
-| `ThemeRegistry` | which enabled extensions the owner has declared to be themes, and which one an actor should see |
-| `ThemeStylesheets` | builds one `forum-theme-<id>.css` per theme by replaying the forum's own CSS sources and filtering by extension id |
-| `SwapStylesheet` | a frontend content callback (priority 0) that replaces the `forum.css` entry in `Document::$css` |
-| `InvalidateThemeStylesheets` | throws the theme sheets away whenever core rebuilds the shared one — **without this they go stale and stay stale** |
+| `ThemeRegistry` | which enabled extensions the owner declared to be themes, and which one an actor should see |
+| `ThemeAssets` | builds one `forum-theme-<id>.css` and one `forum-theme-<id>.js` per theme, filtering the forum's own sources |
+| `ApplyTheme` | swaps the stylesheet, the script and its preload per request; stamps `<html data-wardrobe-theme>`; publishes the theme list |
+| `InvalidateThemeAssets` | marks every theme stale when core rebuilds, and queues the rebuild |
+| `WarmThemeAssets` | recompiles off the request path, so no member pays for a compile |
 
 Three facts in core make it possible without patching anything:
 
 1. `Extend\Frontend` registers extension LESS as
    `$sources->addFile($path, $moduleName)`, so every CSS source knows which
-   extension it came from.
+   extension it came from. JS is attributed by the
+   `flarum.extensions['<id>']=module.exports` line each extension's callback
+   emits.
 2. `Assets::$sources` is public and `flarum.assets.factory` builds a properly
    configured `Assets` for any name — including the LESS import overrides that
    `Extend\Theme` decorates the factory with, so themes that override core LESS
    files keep working.
-3. `RevisionCompiler::getUrl()` commits when there is no revision, so a theme
-   nobody has chosen is never compiled.
+3. `RevisionCompiler::commit()` hashes the compiled **output**, so a rebuild
+   that changes nothing leaves the revision — and every member's cached copy —
+   alone.
+
+**Theme add-ons travel with their theme.** An extension that requires a theme
+(Shattered Pact requires Bespoke) is excluded wherever that theme is, so an
+add-on never loads reaching for exports that aren't there.
 
 ## Cost
 
-Measured on dev.ernestdefoe.online (rc.8, 60+ extensions, Valkey cache, Horizon):
+Measured on a forum with 60+ extensions, Valkey cache, a queue worker:
 
 | | |
 |---|---|
 | Added to a page request | **0.11 ms** p50, 0.16 ms p90 — against a ~70 ms page |
 | Page latency with vs without | 70.2 ms vs 70.4 ms p50 over 50 requests — indistinguishable |
 | Compile, per theme | ~450 ms, off the request path on the queue |
-| Rebuild that changes nothing | revision unchanged, so **no member re-downloads anything** |
+| Rebuild that changes nothing | revision unchanged, so **nobody re-downloads anything** |
 | 20 concurrent requests on a stale theme | **1 compile per theme** (20 without the guard) |
 
-The hot path is all closures — `Assets::css()` appends a callback, `makeCss()`
-defers collection to compile time, `getUrl()` reads a revision — so nothing
-walks the filesystem to render a page. There is deliberately no URL cache on
-top: it would cost more to look up than it saves.
-
-Guests all resolve to the forum default, so guest HTML keeps one stylesheet URL
-and stays cacheable. Per-member choice is for members.
-
-## Measured on the dev forum
-
-Cascade and Mosaic enabled together, plus 60 other extensions:
+Each member's stylesheet is *smaller* than the shared one, because it carries
+one theme instead of all of them:
 
 | stylesheet | bytes | Armory rules | Cascade rules | Mosaic rules |
 |---|---|---|---|---|
@@ -66,32 +81,26 @@ Cascade and Mosaic enabled together, plus 60 other extensions:
 | `forum-theme-ernestdefoe-cascade.css` | 519,361 | 42 | 324 | **0** |
 | `forum-theme-ernestdefoe-mosaic.css` | 546,423 | 42 | **0** | 227 |
 
-Every member gets a *smaller* stylesheet than the shared one, with no foreign
-theme rules in it — and, because
-themes are compiled whole — a theme that overrides core LESS variables still
-works. Mosaic overrides seven of them, which is why a shared "common" sheet
-plus a per-theme delta is **not** a viable optimisation: the overrides would
-never reach the rules they are meant to change.
+Themes are compiled whole, never as a shared sheet plus a per-theme delta: a
+theme that overrides core LESS variables (Mosaic overrides seven) would silently
+stop working if its overrides were compiled apart from the rules they target.
 
-## Not solved yet
+## Notes for forum owners
 
-**Theme JS is still one bundle for everyone.** A theme that ships JS will run
-its JS for every member whatever stylesheet they got. Themes have to gate their
-own behaviour — Cascade already does exactly this for its presets, via an
-attribute on `<html>`. Per-theme JS bundles are possible by the same seam as the
-CSS one, but the JS file source is not tagged with its module name, so it is a
-uglier job. Deliberately out of scope for v1.
+- A guest who never touches the switcher sends no cookie, so guest pages stay
+  byte-identical and cacheable. 🚨 If you run a full-page cache in front of
+  Flarum, add `wardrobe_theme` to its cache key.
+- Switching theme reloads the page. It has to: the running page is the other
+  theme's JavaScript, not just its colours.
+- Themes are detected by the `flarum-extension.category` each extension
+  declares. Anything that calls itself a theme will be offered — tick the ones
+  you mean.
 
-## Configuration (spike)
+## Installation
 
-```sql
-REPLACE INTO settings (`key`,`value`) VALUES
-  ('wardrobe.themes','["ernestdefoe-cascade","ernestdefoe-mosaic"]'),
-  ('wardrobe.default','ernestdefoe-cascade');
+```bash
+composer require ernestdefoe/wardrobe
 ```
-
-A member's choice is the `wardrobeTheme` user preference, holding an extension
-id. Guests and members with no choice get `wardrobe.default`.
 
 ## Licence
 

@@ -1,0 +1,28 @@
+ernestdefoe-wardrobe:
+
+  admin:
+    settings:
+      themes_label: Temas entre los que pueden elegir los miembros
+      themes_help: >
+        Cada extensión activada que se declara como tema. Marca las que ofrece
+        este foro: cada una recibe su propia hoja de estilos, así que nunca se
+        pisan entre ellas.
+      no_themes: >
+        Todavía no hay ningún tema instalado y activado. Instala un segundo tema
+        y aparecerá aquí.
+      default_label: Tema predeterminado
+      default_help: Lo que ven las visitas, y lo que ven los miembros hasta que elijan por su cuenta.
+      allow_user_choice_label: Permitir que los miembros elijan su propio tema
+      allow_user_choice_help: >
+        Desactívalo para mantener todo el foro con el tema predeterminado. Las
+        elecciones que ya hayan hecho los miembros dejan de aplicarse al momento.
+
+  forum:
+    switcher:
+      label: Tema
+
+    theme:
+      heading: Tema
+      follow_forum: Usar el tema del foro
+      help: Cómo ves tú el foro. Nadie más ve tu elección.
+      save_failed: No se ha podido guardar tu tema. Inténtalo de nuevo.

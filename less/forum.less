@@ -1,0 +1,35 @@
+// The switcher is an icon on the desktop header and a labelled row in the
+// mobile drawer — the same shape core gives its own secondary-header items, so
+// it reads as one of them rather than as something bolted on.
+.WardrobeSwitcher {
+  .Button-label {
+    display: none;
+  }
+}
+
+// Inside the mobile slide-out drawer the item is a full-width row, so the label
+// comes back and the dropdown menu must stay in flow rather than being
+// positioned off the edge of the drawer.
+@media @phone {
+  .App-drawer .WardrobeSwitcher {
+    .Button-label {
+      display: inline;
+    }
+  }
+
+  .App-drawer .WardrobeSwitcher-menu {
+    position: static;
+    box-shadow: none;
+    float: none;
+  }
+}
+
+.WardrobeSwitcher-option {
+  .Button-icon {
+    opacity: 0.7;
+  }
+
+  &.active .Button-icon {
+    opacity: 1;
+  }
+}

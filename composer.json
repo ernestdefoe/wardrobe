@@ -2,7 +2,12 @@
     "name": "ernestdefoe/wardrobe",
     "description": "Wardrobe — install several themes on one Flarum 2 forum and let every member choose the one they see.",
     "type": "flarum-extension",
-    "keywords": ["flarum", "theme", "themes", "appearance"],
+    "keywords": [
+        "flarum",
+        "theme",
+        "themes",
+        "appearance"
+    ],
     "license": "MIT",
     "authors": [
         {
@@ -22,7 +27,7 @@
     "extra": {
         "flarum-extension": {
             "title": "Wardrobe",
-            "category": "theme"
+            "category": "feature"
         }
     }
 }

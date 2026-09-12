@@ -19,6 +19,15 @@ Wardrobe compiles those same sources once per theme, each time with every
 *other* theme left out of both bundles, and serves each visitor the pair that
 belongs to their choice. No theme has to be modified, and core is not patched.
 
+## The same forum, the same moment, two members
+
+![Cascade, as ernest sees it](screenshots/theme-cascade.png)
+
+![Mosaic, as another member sees it at the same time](screenshots/theme-mosaic.png)
+
+Not a recolour: each member gets that theme's stylesheet **and** its JavaScript,
+so its components render and the other theme's do not.
+
 ## What people see
 
 - **A theme switcher in the header** — one click, for members and guests alike.
@@ -26,6 +35,12 @@ belongs to their choice. No theme has to be modified, and core is not patched.
   settings, with "Use the forum's theme" as its first option.
 - **Admins** tick which installed themes the forum offers, pick the default, and
   can turn member choice off entirely to hold one look.
+
+![The header switcher, open](screenshots/header-switcher.png)
+
+![The picker on a member's settings page](screenshots/member-settings.png)
+
+![Wardrobe's admin settings](screenshots/admin-settings.png)
 
 A member's choice is stored as a preference, so it follows them between devices.
 A guest's is a cookie, read server-side on the next request — so a guest gets a

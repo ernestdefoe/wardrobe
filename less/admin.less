@@ -1,0 +1,26 @@
+// Wardrobe's settings panel is one custom component, so it does not inherit the
+// spacing core gives a page built from registered settings — without this the
+// last theme toggle collides with the next heading.
+.WardrobeSettings {
+  .Form-group + .Form-group {
+    margin-top: 24px;
+  }
+
+  // The help text belongs to the heading above it, not to the first row below.
+  > .Form-group > .helpText {
+    margin-bottom: 10px;
+  }
+}
+
+.WardrobeSettings-theme {
+  margin: 8px 0;
+
+  // Line the switches up with the heading rather than the help text's indent.
+  .Checkbox {
+    margin: 0;
+  }
+}
+
+.WardrobeSettings-empty {
+  padding: 12px 0;
+}

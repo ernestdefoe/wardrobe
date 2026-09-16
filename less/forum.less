@@ -11,7 +11,22 @@
 // comes back and the dropdown menu must stay in flow rather than being
 // positioned off the edge of the drawer.
 @media @phone {
+  /*
+   * 🚨 Undo `Button--icon`, which this button carries for the desktop header.
+   *
+   * That class zeroes the horizontal padding and leaves core's filled button
+   * background on — correct for a round icon in the header, wrong for a
+   * full-width row in the drawer, where it put the icon 13px left of every
+   * neighbouring row's and drew the only filled pill in the list, so the
+   * switcher read as selected and visibly failed to line up.
+   *
+   * The values are core's own `.Button` padding, which is what the rows above
+   * and below this one are using.
+   */
   .App-drawer .WardrobeSwitcher {
+    padding: 8px 13px;
+    background: transparent;
+
     .Button-label {
       display: inline;
     }
@@ -35,7 +50,26 @@
   }
 
   .App-drawer .WardrobeSwitcher-menu {
-    position: static;
+    /*
+     * 🚨 `relative`, NOT `static` — and the difference is the whole of why
+     * the themes could not be tapped.
+     *
+     * Both lay the menu out identically here: an unoffset relative box sits
+     * exactly where a static one would, in flow. But z-index is IGNORED on a
+     * statically positioned element, and core already gives `.Dropdown-menu`
+     * a z-index of 1030 precisely so it clears the `.dropdown-backdrop` that
+     * an open dropdown drops over the page on touch devices at 1020.
+     *
+     * So with `static` the menu rendered in the right place and every option
+     * in it was unclickable: `elementFromPoint` over each theme returned the
+     * backdrop, and tapping one dismissed the dropdown instead of choosing a
+     * theme. The full-screen dim made it read as a modal that had opened over
+     * the menu — which is exactly what it was.
+     *
+     * The backdrop itself is core behaviour, shared with every other dropdown
+     * in the drawer, and is deliberately left alone.
+     */
+    position: relative;
     box-shadow: none;
     float: none;
 

@@ -17,10 +17,41 @@
     }
   }
 
+  /*
+   * 🚨 The container must stop being a flex ROW once the menu is in flow.
+   *
+   * `.ButtonGroup` is `inline-flex`, and the menu is a SIBLING of the toggle
+   * inside it — so the moment `position: static` puts the menu back in flow it
+   * becomes a flex item, the row grows to the menu's full height, and the
+   * toggle stretches beside it to match. On a themed forum that draws a pill
+   * radius on drawer toggles (Warren does) the result is a ~250x240 circle
+   * filling the drawer, which is how this was reported.
+   *
+   * Core's own ThemeToggle does the same in-flow trick and is unaffected,
+   * because its dropdown is `display: block`. This is that.
+   */
+  .App-drawer .WardrobeSwitcher-dropdown {
+    display: block;
+  }
+
   .App-drawer .WardrobeSwitcher-menu {
     position: static;
     box-shadow: none;
     float: none;
+
+    /*
+     * 🚨 `display`, not core's `visibility`, because this menu is in flow.
+     *
+     * Core hides a closed dropdown with `visibility: hidden`, which is free
+     * only while the menu is absolutely positioned — it still occupies layout.
+     * In flow that reserved a full menu's height of dead space inside the
+     * drawer, below the last item, whether or not anybody opened it.
+     */
+    display: none;
+  }
+
+  .App-drawer .WardrobeSwitcher-dropdown.open .WardrobeSwitcher-menu {
+    display: block;
   }
 }
 

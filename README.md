@@ -117,9 +117,11 @@ stop working if its overrides were compiled apart from the rules they target.
 composer require ernestdefoe/wardrobe
 ```
 
-## Discuss
+## Support
 
-Questions, ideas and release notes: [Wardrobe on discuss.flarum.org](https://discuss.flarum.org/d/39845-wardrobe-multi-theme-support-built-using-ai).
+- **Support forum:** [Wardrobe on ernestdefoe.online](https://ernestdefoe.online/d/91)
+- **Flarum community:** [Wardrobe on discuss.flarum.org](https://discuss.flarum.org/d/39845-wardrobe-multi-theme-support-built-using-ai)
+- **Bug reports:** [GitHub issues](https://github.com/ernestdefoe/wardrobe/issues)
 
 ## Licence
 

@@ -32,7 +32,11 @@ export default class WardrobeSettings extends Component {
         <div className="Form-group">
           <label>{t('themes_label')}</label>
           <div className="helpText">{t('themes_help')}</div>
-          {installed.length === 0 ? <div className="WardrobeSettings-empty helpText">{t('no_themes')}</div> : installed.map((ext) => this.themeSwitch(page, ext, chosen))}
+          {installed.length === 0 ? (
+            <div className="WardrobeSettings-empty helpText">{t('no_themes')}</div>
+          ) : (
+            installed.map((ext) => this.themeSwitch(page, ext, chosen))
+          )}
         </div>
 
         {chosen.length > 0 ? (

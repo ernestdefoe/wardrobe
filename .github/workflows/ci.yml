@@ -1,6 +1,8 @@
-# Two things ship in this repo that can drift silently: the PHP that rewrites
-# another forum's asset pipeline, and the committed JS bundle that Flarum
-# actually loads. Both are gated here.
+# What the shared Flarum workflows (backend.yml, frontend.yml) don't check:
+# that composer.json is valid, and that the committed JS bundle — what forums
+# actually load, never rebuilt on install — matches a fresh build of js/src.
+# The PHP that rewrites the forum's asset pipeline is covered by backend.yml's
+# integration tests and PHPStan.
 
 name: CI
 
@@ -15,7 +17,7 @@ permissions:
 
 jobs:
   php:
-    name: PHP
+    name: composer.json
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,9 +29,6 @@ jobs:
 
       - name: Validate composer.json
         run: composer validate --strict
-
-      - name: Lint every PHP file
-        run: find src extend.php -name '*.php' -print0 | xargs -0 -n1 php -l
 
   js:
     name: JS bundle

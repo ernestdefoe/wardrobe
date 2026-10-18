@@ -7,6 +7,10 @@ import isExtensionEnabled from 'flarum/admin/utils/isExtensionEnabled';
 const THEMES = 'wardrobe.themes';
 const DEFAULT = 'wardrobe.default';
 const ALLOW = 'wardrobe.allow_user_choice';
+const OFFER_FLARUM = 'wardrobe.offer_flarum';
+
+// Matches ThemeRegistry::FLARUM — no extension id can be a bare word.
+const FLARUM = 'flarum';
 
 const SELF = 'ernestdefoe-wardrobe';
 
@@ -26,6 +30,7 @@ export default class WardrobeSettings extends Component {
     const page = this.attrs.page;
     const installed = installedThemes();
     const chosen = chosenThemes(page);
+    const choices = choicesOf(page, chosen);
 
     return (
       <div className="WardrobeSettings">
@@ -41,11 +46,20 @@ export default class WardrobeSettings extends Component {
 
         {chosen.length > 0 ? (
           <div className="Form-group">
+            <Switch state={offersFlarum(page)} onchange={(value) => toggleFlarum(page, value)}>
+              {t('offer_flarum_label')}
+            </Switch>
+            <div className="helpText">{t('offer_flarum_help')}</div>
+          </div>
+        ) : null}
+
+        {chosen.length > 0 ? (
+          <div className="Form-group">
             <label>{t('default_label')}</label>
             <div className="helpText">{t('default_help')}</div>
             <Select
-              value={defaultTheme(page, chosen)}
-              options={Object.fromEntries(chosen.map((id) => [id, titleOf(id)]))}
+              value={defaultTheme(page, choices)}
+              options={Object.fromEntries(choices.map((id) => [id, titleOf(id)]))}
               onchange={(value) => page.setting(DEFAULT)(value)}
             />
           </div>
@@ -102,23 +116,42 @@ function chosenThemes(page) {
   }
 }
 
+/** Matches ThemeRegistry::choices(): plain Flarum only alongside real themes. */
+function choicesOf(page, chosen) {
+  return chosen.length && offersFlarum(page) ? [...chosen, FLARUM] : chosen;
+}
+
+function offersFlarum(page) {
+  return !!Number(page.setting(OFFER_FLARUM)() || 0);
+}
+
 function toggleTheme(page, id, on) {
   const next = on ? [...chosenThemes(page), id] : chosenThemes(page).filter((existing) => existing !== id);
 
   page.setting(THEMES)(JSON.stringify(next));
+  keepDefaultReal(page);
+}
 
-  // Untick the theme that was the default and the stored default is dangling.
-  // Point it at something real so the dropdown never shows an empty selection
-  // and the forum never falls back to the shared stylesheet by accident.
-  if (!next.includes(page.setting(DEFAULT)())) {
-    page.setting(DEFAULT)(next[0] ?? '');
+function toggleFlarum(page, on) {
+  page.setting(OFFER_FLARUM)(on ? '1' : '0');
+  keepDefaultReal(page);
+}
+
+// Untick whatever was the default and the stored default is dangling. Point it
+// at something real so the dropdown never shows an empty selection and the
+// forum never falls back to the shared stylesheet by accident.
+function keepDefaultReal(page) {
+  const choices = choicesOf(page, chosenThemes(page));
+
+  if (!choices.includes(page.setting(DEFAULT)())) {
+    page.setting(DEFAULT)(choices[0] ?? '');
   }
 }
 
-function defaultTheme(page, chosen) {
+function defaultTheme(page, choices) {
   const stored = page.setting(DEFAULT)();
 
-  return chosen.includes(stored) ? stored : chosen[0];
+  return choices.includes(stored) ? stored : choices[0];
 }
 
 /** Unset means yes — matching ThemeRegistry::allowsUserChoice(). */
@@ -129,6 +162,8 @@ function allowsUserChoice(page) {
 }
 
 function titleOf(id) {
+  if (id === FLARUM) return t('flarum_title');
+
   const extension = app.data.extensions?.[id];
 
   return extension?.extra?.['flarum-extension']?.title || id;

@@ -104,7 +104,7 @@ class ThemeAssets
      */
     public function warmAll(): void
     {
-        foreach ($this->registry->ids() as $themeId) {
+        foreach ($this->registry->choices() as $themeId) {
             if (! $this->isStale($themeId)) {
                 continue;
             }
@@ -199,7 +199,7 @@ class ThemeAssets
             return $this->compilers[$themeId];
         }
 
-        if (! in_array($themeId, $this->registry->ids(), true)) {
+        if (! in_array($themeId, $this->registry->choices(), true)) {
             return $this->compilers[$themeId] = null;
         }
 
@@ -312,7 +312,8 @@ class ThemeAssets
 
     /**
      * Everything to leave out when building for one theme: every other theme,
-     * plus anything that depends on one of them.
+     * plus anything that depends on one of them. For plain Flarum that is
+     * every theme, since it is none of them.
      *
      * 🚨 The dependents matter. A theme addon — Shattered Pact is built on
      * Bespoke — is not itself a theme, so it is never in the registry, and

@@ -5,6 +5,7 @@ namespace Ernestdefoe\Wardrobe;
 use Flarum\Extension\ExtensionManager;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\User\User;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Which installed extensions the owner has declared to be themes, and which
@@ -20,13 +21,22 @@ class ThemeRegistry
     public const THEMES = 'wardrobe.themes';
     public const DEFAULT = 'wardrobe.default';
     public const ALLOW_USER_CHOICE = 'wardrobe.allow_user_choice';
+    public const OFFER_FLARUM = 'wardrobe.offer_flarum';
     public const PREFERENCE = 'wardrobeTheme';
+
+    /**
+     * The choice that is no theme at all: Flarum's own look, built with every
+     * theme left out. No extension can have this id — extension ids are always
+     * `vendor-name` — so it never collides with a real one.
+     */
+    public const FLARUM = 'flarum';
 
     private ?array $ids = null;
 
     public function __construct(
         private SettingsRepositoryInterface $settings,
-        private ExtensionManager $extensions
+        private ExtensionManager $extensions,
+        private TranslatorInterface $translator
     ) {
     }
 
@@ -49,6 +59,30 @@ class ThemeRegistry
             array_map('strval', $configured),
             fn (string $id) => $this->extensions->isEnabled($id)
         ));
+    }
+
+    /**
+     * Everything a forum offers: its themes, plus Flarum's own look when the
+     * owner has switched that on.
+     *
+     * 🚨 Plain Flarum is a build of its own, never "leave the shared assets
+     * alone". The shared forum.css and forum.js carry EVERY theme at once, so
+     * serving them as "no theme" would serve all of them.
+     *
+     * A forum with no themes offers nothing — there is nothing to switch from.
+     *
+     * @return string[]
+     */
+    public function choices(): array
+    {
+        $ids = $this->ids();
+
+        return $ids && $this->offersFlarum() ? [...$ids, self::FLARUM] : $ids;
+    }
+
+    public function offersFlarum(): bool
+    {
+        return (bool) $this->settings->get(self::OFFER_FLARUM);
     }
 
     /**
@@ -76,13 +110,17 @@ class ThemeRegistry
     public function listing(): array
     {
         return array_map(function (string $id) {
+            if ($id === self::FLARUM) {
+                return ['id' => $id, 'title' => $this->translator->trans('ernestdefoe-wardrobe.forum.theme.flarum')];
+            }
+
             $extension = $this->extensions->getExtension($id);
 
             return [
                 'id' => $id,
                 'title' => $extension?->getTitle() ?: $id,
             ];
-        }, $this->ids());
+        }, $this->choices());
     }
 
     /**
@@ -96,7 +134,7 @@ class ThemeRegistry
     {
         $default = $this->settings->get(self::DEFAULT);
 
-        if (in_array($default, $this->ids(), true)) {
+        if (in_array($default, $this->choices(), true)) {
             return $default;
         }
 
@@ -134,7 +172,7 @@ class ThemeRegistry
         // any other client-supplied string.
         $chosen = $actor->isGuest() ? $guestChoice : $actor->getPreference(self::PREFERENCE);
 
-        if (is_string($chosen) && in_array($chosen, $this->ids(), true)) {
+        if (is_string($chosen) && in_array($chosen, $this->choices(), true)) {
             return $chosen;
         }
 
@@ -151,6 +189,6 @@ class ThemeRegistry
      */
     public function validPreference(mixed $value): string
     {
-        return is_string($value) && in_array($value, $this->ids(), true) ? $value : '';
+        return is_string($value) && in_array($value, $this->choices(), true) ? $value : '';
     }
 }

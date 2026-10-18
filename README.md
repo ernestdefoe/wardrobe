@@ -35,6 +35,9 @@ so its components render and the other theme's do not.
   settings, with "Use the forum's theme" as its first option.
 - **Admins** tick which installed themes the forum offers, pick the default, and
   can turn member choice off entirely to hold one look.
+- **Plain Flarum as a choice.** Switch on "Offer Flarum's standard look" and
+  "Flarum (no theme)" joins the list: the forum as it looks out of the box, built
+  with every theme left out. It can be the default too.
 
 ![The header switcher, open](screenshots/header-switcher.png)
 

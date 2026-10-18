@@ -3,12 +3,14 @@
 namespace Ernestdefoe\Wardrobe\Tests\integration\api;
 
 use Flarum\Frontend\Event\AssetsRecompiled;
+use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
 use Flarum\User\User;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laminas\Diactoros\ServerRequest;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * No real themes are installed here, so two ordinary extensions stand in for
@@ -37,6 +39,12 @@ class WardrobeTest extends TestCase
         if ($default) {
             $this->setting('wardrobe.default', $default);
         }
+    }
+
+    /** setting() only seeds the database before the app boots; this changes it after. */
+    private function liveSetting(string $key, string $value): void
+    {
+        $this->app()->getContainer()->make(SettingsRepositoryInterface::class)->set($key, $value);
     }
 
     private function page(?int $actor = null, array $cookies = []): string
@@ -179,6 +187,81 @@ class WardrobeTest extends TestCase
 
         $this->assertSame(self::FLAGS, $this->active($this->page(null, ['wardrobe_theme' => self::FLAGS])));
         $this->assertSame(self::TAGS, $this->active($this->page(null, ['wardrobe_theme' => 'acme-not-installed'])));
+    }
+
+    #[Test]
+    public function plain_flarum_is_offered_only_when_switched_on()
+    {
+        $this->themes();
+
+        $this->assertSame([self::TAGS, self::FLAGS], array_column($this->payload($this->page())['themes'], 'id'));
+        $this->assertSame(self::TAGS, $this->active($this->page(null, ['wardrobe_theme' => 'flarum'])), 'A cookie cannot pick it while it is off');
+
+        $this->preference('flarum');
+        $this->assertSame('', $this->stored(), 'Nor can a preference');
+
+        $this->liveSetting('wardrobe.offer_flarum', '1');
+
+        $themes = $this->payload($this->page())['themes'];
+        $this->assertSame([self::TAGS, self::FLAGS, 'flarum'], array_column($themes, 'id'));
+        // Extension locales are not loaded in the test app, so this proves the
+        // key; the English string is checked on a real forum.
+        $translator = $this->app()->getContainer()->make(TranslatorInterface::class);
+        $this->assertSame($translator->trans('ernestdefoe-wardrobe.forum.theme.flarum'), $themes[2]['title']);
+    }
+
+    #[Test]
+    public function plain_flarum_is_built_with_every_theme_left_out()
+    {
+        $this->themes();
+        $this->setting('wardrobe.offer_flarum', '1');
+
+        $html = $this->page(null, ['wardrobe_theme' => 'flarum']);
+
+        $this->assertSame('flarum', $this->active($html));
+        $this->assertMatchesRegularExpression('#/assets/forum-theme-flarum\.css#', $html);
+        $this->assertMatchesRegularExpression('#/assets/forum-theme-flarum\.js#', $html);
+        $this->assertDoesNotMatchRegularExpression('#(href|src)="[^"]*/assets/forum\.(css|js)\b#', $html, 'Never the shared bundle, which carries every theme');
+
+        $assets = $this->app()->getContainer()->make('flarum.paths')->public.'/assets/';
+        $css = (string) file_get_contents($assets.'forum-theme-flarum.css');
+        $js = (string) file_get_contents($assets.'forum-theme-flarum.js');
+
+        $this->assertStringContainsString('.Header', $css, "Core's own styles stay");
+        $this->assertStringNotContainsString('.TagLabel', $css);
+        $this->assertStringNotContainsString('.Post--flagged', $css);
+        $this->assertStringNotContainsString("flarum.extensions['flarum-tags']", $js);
+        $this->assertStringNotContainsString("flarum.extensions['flarum-flags']", $js);
+    }
+
+    #[Test]
+    public function plain_flarum_can_be_chosen_and_be_the_default()
+    {
+        $this->themes(default: 'flarum');
+        $this->setting('wardrobe.offer_flarum', '1');
+
+        $this->assertSame('flarum', $this->active($this->page()));
+
+        $this->preference(self::FLAGS);
+        $this->assertSame(self::FLAGS, $this->active($this->page(2)));
+
+        $this->preference('flarum');
+        $this->assertSame('flarum', $this->stored());
+        $this->assertSame('flarum', $this->active($this->page(2)));
+
+        $this->liveSetting('wardrobe.offer_flarum', '0');
+        $this->assertSame(self::TAGS, $this->active($this->page(2)), 'Switching it off moves everyone on it to a real theme');
+    }
+
+    #[Test]
+    public function plain_flarum_is_not_a_choice_without_themes()
+    {
+        $this->setting('wardrobe.offer_flarum', '1');
+
+        $html = $this->page(null, ['wardrobe_theme' => 'flarum']);
+
+        $this->assertNull($this->active($html));
+        $this->assertSame([], $this->payload($html)['themes']);
     }
 
     #[Test]

@@ -2,11 +2,15 @@
 
 namespace Ernestdefoe\Wardrobe\Tests\integration\api;
 
+use Ernestdefoe\Wardrobe\ThemeAssets;
+use Ernestdefoe\Wardrobe\ThemeRegistry;
 use Flarum\Frontend\Event\AssetsRecompiled;
+use Flarum\Settings\DatabaseSettingsRepository;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
 use Flarum\User\User;
+use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laminas\Diactoros\ServerRequest;
 use PHPUnit\Framework\Attributes\Test;
@@ -273,5 +277,49 @@ class WardrobeTest extends TestCase
         $this->app()->getContainer()->make(Dispatcher::class)->dispatch(new AssetsRecompiled());
 
         $this->assertGreaterThan(0, (int) $this->database()->table('settings')->where('key', 'wardrobe.stale_at')->value('value'));
+    }
+
+    /**
+     * 🚨 Seen on dev: the queue worker booted before an extension update, so
+     * it compiled the theme from its boot-time sources — and stamped the
+     * result as built *now*, after the rebuild was marked. Every page request
+     * then took the old bundle as current until the worker was restarted.
+     */
+    #[Test]
+    public function a_build_by_a_process_that_booted_before_the_change_is_not_current()
+    {
+        $this->themes();
+        $container = $this->app()->getContainer();
+
+        // This process has read its settings; another one now marks a rebuild.
+        $container->make(SettingsRepositoryInterface::class)->get('wardrobe.stale_at');
+        $this->database()->table('settings')->insert(['key' => 'wardrobe.stale_at', 'value' => (string) (time() - 5)]);
+
+        $container->make(ThemeAssets::class)->warmAll();
+
+        // A process booted after the change must still see the theme as stale.
+        $fresh = new ThemeAssets(
+            $container,
+            $container->make(ThemeRegistry::class),
+            new DatabaseSettingsRepository($this->database()),
+            $container->make(Cache::class)
+        );
+
+        $theme = self::TAGS;
+        $this->assertTrue((fn () => $this->isStale($theme))->call($fresh), "The theme was built from sources older than the mark");
+    }
+
+    #[Test]
+    public function two_rebuilds_in_the_same_second_are_two_marks()
+    {
+        $this->themes();
+        $assets = $this->app()->getContainer()->make(ThemeAssets::class);
+        $settings = $this->app()->getContainer()->make(SettingsRepositoryInterface::class);
+
+        $assets->markStale();
+        $first = $settings->get('wardrobe.stale_at');
+        $assets->markStale();
+
+        $this->assertGreaterThan((float) $first, (float) $settings->get('wardrobe.stale_at'));
     }
 }

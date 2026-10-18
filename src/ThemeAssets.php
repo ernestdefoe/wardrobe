@@ -121,19 +121,32 @@ class ThemeAssets
      */
     public function markStale(): void
     {
-        $this->settings->set('wardrobe.stale_at', time());
+        // Microseconds: a disable and an enable chained in one command land
+        // in the same second, and must still be two marks.
+        $this->settings->set('wardrobe.stale_at', sprintf('%.6F', microtime(true)));
 
         $this->fresh = [];
     }
 
     /**
-     * 🚨 `built_at` lives in the cache, not in settings, and that is
-     * load-bearing. Flarum's settings repository memoises for the whole
-     * request, so a burst of requests that booted before a rebuild would each
-     * read their own stale copy, walk straight past the in-lock recheck, and
-     * compile the same assets again. Measured: 20 concurrent requests produced
-     * 20 compiles unlocked, 9 with the lock and a settings-based recheck, and 1
-     * once the recheck read the cache instead.
+     * A build is current when it answered the latest mark — not when it
+     * finished after it.
+     *
+     * 🚨 A build records the mark *this process* saw, never the time it
+     * finished. Settings are read once at boot, alongside the extension list
+     * the container was built from, so the two always agree. A process booted
+     * before a change — above all the long-lived queue worker — compiles from
+     * the old sources, and stamping that with the clock made every page
+     * request take the old bundle as current until the worker was restarted.
+     * Seen on dev, twice. Stamped with its own boot-time mark instead, it
+     * stays behind the new mark and the next fresh request rebuilds.
+     *
+     * 🚨 The built mark lives in the cache, not in settings, and that is
+     * load-bearing too: memoised settings would let a burst of requests walk
+     * straight past the in-lock recheck and compile the same assets again.
+     * Measured: 20 concurrent requests produced 20 compiles unlocked, 9 with
+     * the lock and a settings-based recheck, and 1 once the recheck read the
+     * cache instead.
      */
     private function isStale(string $themeId): bool
     {
@@ -141,10 +154,12 @@ class ThemeAssets
             return false;
         }
 
-        $staleAt = (int) $this->settings->get('wardrobe.stale_at');
-        $builtAt = (int) $this->cache->get($this->builtKey($themeId), 0);
+        return (float) $this->cache->get($this->builtKey($themeId), -1) < $this->staleAt();
+    }
 
-        return $builtAt <= $staleAt;
+    private function staleAt(): float
+    {
+        return (float) $this->settings->get('wardrobe.stale_at');
     }
 
     /**
@@ -183,11 +198,13 @@ class ThemeAssets
     {
         // Not force: identical output keeps its revision, so members already
         // carrying these assets keep the copies in their browser.
+        $answers = $this->staleAt();
+
         foreach ($compilers as $compiler) {
             $compiler->commit();
         }
 
-        $this->cache->forever($this->builtKey($themeId), time());
+        $this->cache->forever($this->builtKey($themeId), $answers);
 
         $this->fresh[$themeId] = true;
     }
@@ -363,6 +380,6 @@ class ThemeAssets
 
     private function builtKey(string $themeId): string
     {
-        return 'wardrobe.built.'.$themeId;
+        return 'wardrobe.built_for.'.$themeId;
     }
 }

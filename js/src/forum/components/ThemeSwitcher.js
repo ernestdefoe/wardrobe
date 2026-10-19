@@ -21,7 +21,11 @@ export default class ThemeSwitcher extends Component {
     return (
       <Dropdown
         className="WardrobeSwitcher-dropdown"
-        buttonClassName="Button Button--icon WardrobeSwitcher"
+        // Button--flat, as on core's own notifications and session toggles:
+        // themes that hide the icon of every non-flat dropdown toggle (Avocado
+        // does, to tidy labelled toggles) would otherwise leave this an empty
+        // button.
+        buttonClassName="Button Button--icon Button--flat WardrobeSwitcher"
         menuClassName="Dropdown-menu WardrobeSwitcher-menu"
         icon="fas fa-palette"
         caretIcon={null}

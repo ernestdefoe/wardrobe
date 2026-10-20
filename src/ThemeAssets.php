@@ -154,12 +154,22 @@ class ThemeAssets
             return false;
         }
 
-        return (float) $this->cache->get($this->builtKey($themeId), -1) < $this->staleAt();
+        return (float) $this->cache->get($this->builtKey($themeId), -1) < (float) $this->staleAt();
     }
 
-    private function staleAt(): float
+    /**
+     * The mark exactly as it was written — a string, never a float.
+     *
+     * 🚨 Stored as a float, the mark went into Redis through phpredis, which
+     * writes a double at 14 significant digits: 1792527414.066511 came back as
+     * 1792527414.0665, below the mark it answered, so every theme was stale on
+     * every request and every page view recompiled its theme — 1.6 s a page on
+     * the showcase, 17 s with 30 visitors at once. A numeric string goes into
+     * Redis byte for byte.
+     */
+    private function staleAt(): string
     {
-        return (float) $this->settings->get('wardrobe.stale_at');
+        return (string) $this->settings->get('wardrobe.stale_at');
     }
 
     /**

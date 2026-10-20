@@ -10,6 +10,8 @@ use Flarum\Settings\SettingsRepositoryInterface;
 use Flarum\Testing\integration\RetrievesAuthorizedUsers;
 use Flarum\Testing\integration\TestCase;
 use Flarum\User\User;
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Events\Dispatcher;
 use Laminas\Diactoros\ServerRequest;
@@ -321,5 +323,45 @@ class WardrobeTest extends TestCase
         $assets->markStale();
 
         $this->assertGreaterThan((float) $first, (float) $settings->get('wardrobe.stale_at'));
+    }
+
+    /**
+     * 🚨 Seen on the showcase: phpredis writes a float at 14 significant
+     * digits, so a build stamped with the mark as a float read back as below
+     * it — 1792527414.066511 became 1792527414.0665 — and every page view
+     * recompiled its theme.
+     */
+    #[Test]
+    public function a_build_is_current_when_its_cache_rounds_numbers_like_redis()
+    {
+        $this->themes();
+        // The mark seen there: one that rounds DOWN at 14 digits.
+        $this->setting('wardrobe.stale_at', '1792527414.066511');
+        $container = $this->app()->getContainer();
+
+        $store = new class extends ArrayStore {
+            public function forever($key, $value)
+            {
+                return parent::forever($key, is_float($value) ? sprintf('%.14G', $value) : $value);
+            }
+        };
+
+        $assets = new ThemeAssets(
+            $container,
+            $container->make(ThemeRegistry::class),
+            $container->make(SettingsRepositoryInterface::class),
+            new CacheRepository($store)
+        );
+        $assets->warmAll();
+
+        // As the next request sees it: nothing remembered from this one.
+        $theme = self::TAGS;
+        $staleNextRequest = (function () use ($theme) {
+            $this->fresh = [];
+
+            return $this->isStale($theme);
+        })->call($assets);
+
+        $this->assertFalse($staleNextRequest, 'A theme just built is stale again on the next request');
     }
 }

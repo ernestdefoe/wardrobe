@@ -8,6 +8,7 @@ use Flarum\Frontend\Compiler\Source\FileSource;
 use Flarum\Frontend\Compiler\Source\SourceCollector;
 use Flarum\Frontend\Compiler\Source\SourceInterface;
 use Flarum\Frontend\Compiler\Source\StringSource;
+use Flarum\Frontend\Compiler\VersionerInterface;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
@@ -64,11 +65,15 @@ class ThemeAssets
     /** @var array<string, string[]>|null theme id => ids excluded with it */
     private ?array $companions = null;
 
+    /** The shared bundles' revisions as a queued warm-up was told them. */
+    private ?string $shared = null;
+
     public function __construct(
         private Container $container,
         private ThemeRegistry $registry,
         private SettingsRepositoryInterface $settings,
-        private Cache $cache
+        private Cache $cache,
+        private VersionerInterface $versioner
     ) {
     }
 
@@ -101,9 +106,15 @@ class ThemeAssets
      * Bring every configured theme up to date — the background half of
      * {@see WarmThemeAssets}, so no member is the one who pays for a
      * compile.
+     *
+     * @param string|null $shared {@see sharedRevision()} as the process that
+     *                            queued this saw it, since a long-lived worker's
+     *                            own copy of the manifest can be hours old.
      */
-    public function warmAll(): void
+    public function warmAll(?string $shared = null): void
     {
+        $this->shared = $shared;
+
         foreach ($this->registry->choices() as $themeId) {
             if (! $this->isStale($themeId)) {
                 continue;
@@ -126,6 +137,7 @@ class ThemeAssets
         $this->settings->set('wardrobe.stale_at', sprintf('%.6F', microtime(true)));
 
         $this->fresh = [];
+        $this->shared = null;
     }
 
     /**
@@ -154,7 +166,30 @@ class ThemeAssets
             return false;
         }
 
-        return (float) $this->cache->get($this->builtKey($themeId), -1) < (float) $this->staleAt();
+        [$mark, $shared] = explode('|', (string) $this->cache->get($this->builtKey($themeId), '-1'), 2) + [1 => null];
+
+        return $shared !== $this->sharedRevision() || (float) $mark < (float) $this->staleAt();
+    }
+
+    /**
+     * The revisions of the shared forum.js and forum.css — what a theme's
+     * assets are built from, minus the other themes.
+     *
+     * 🚨 The mark alone misses every rebuild that fires no event.
+     * `millwright:rebuild-assets` commits the shared bundles directly and
+     * clears their dirty flag, so `AssetsRecompiled` never fires: after an
+     * extension update forum.js carried the new code and every theme bundle
+     * kept the old one until someone rebuilt them by hand. Seen three times on
+     * 2026-10-25. Any rebuild of the shared assets that changes them moves one
+     * of these revisions, however it was started, and a theme built against
+     * the old ones is stale.
+     *
+     * Free on the hot path: core's own asset links have already read the
+     * manifest for this request, and the versioner keeps it.
+     */
+    public function sharedRevision(): string
+    {
+        return $this->shared ??= $this->versioner->getRevision('forum.js').'.'.$this->versioner->getRevision('forum.css');
     }
 
     /**
@@ -214,7 +249,7 @@ class ThemeAssets
             $compiler->commit();
         }
 
-        $this->cache->forever($this->builtKey($themeId), $answers);
+        $this->cache->forever($this->builtKey($themeId), $answers.'|'.$this->sharedRevision());
 
         $this->fresh[$themeId] = true;
     }

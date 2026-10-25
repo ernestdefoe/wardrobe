@@ -18,8 +18,13 @@ use Flarum\Queue\AbstractJob;
  */
 class WarmThemeAssets extends AbstractJob
 {
+    public function __construct(
+        public ?string $shared = null
+    ) {
+    }
+
     public function handle(ThemeAssets $assets): void
     {
-        $assets->warmAll();
+        $assets->warmAll($this->shared);
     }
 }

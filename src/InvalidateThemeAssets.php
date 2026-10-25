@@ -49,6 +49,6 @@ class InvalidateThemeAssets
             return;
         }
 
-        $this->queue->push(new WarmThemeAssets());
+        $this->queue->push(new WarmThemeAssets($this->assets->sharedRevision()));
     }
 }

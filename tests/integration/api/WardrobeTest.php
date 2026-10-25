@@ -4,6 +4,7 @@ namespace Ernestdefoe\Wardrobe\Tests\integration\api;
 
 use Ernestdefoe\Wardrobe\ThemeAssets;
 use Ernestdefoe\Wardrobe\ThemeRegistry;
+use Flarum\Frontend\Compiler\VersionerInterface;
 use Flarum\Frontend\Event\AssetsRecompiled;
 use Flarum\Settings\DatabaseSettingsRepository;
 use Flarum\Settings\SettingsRepositoryInterface;
@@ -64,6 +65,20 @@ class WardrobeTest extends TestCase
         }
 
         return (string) $this->send($request)->getBody();
+    }
+
+    /** Wardrobe as a newly booted request sees it: nothing remembered from this one. */
+    private function nextRequest(): ThemeAssets
+    {
+        $container = $this->app()->getContainer();
+
+        return new ThemeAssets(
+            $container,
+            $container->make(ThemeRegistry::class),
+            $container->make(SettingsRepositoryInterface::class),
+            $container->make(Cache::class),
+            $container->make(VersionerInterface::class)
+        );
     }
 
     private function payload(string $html): array
@@ -304,7 +319,8 @@ class WardrobeTest extends TestCase
             $container,
             $container->make(ThemeRegistry::class),
             new DatabaseSettingsRepository($this->database()),
-            $container->make(Cache::class)
+            $container->make(Cache::class),
+            $container->make(VersionerInterface::class)
         );
 
         $theme = self::TAGS;
@@ -350,7 +366,8 @@ class WardrobeTest extends TestCase
             $container,
             $container->make(ThemeRegistry::class),
             $container->make(SettingsRepositoryInterface::class),
-            new CacheRepository($store)
+            new CacheRepository($store),
+            $container->make(VersionerInterface::class)
         );
         $assets->warmAll();
 
@@ -363,5 +380,46 @@ class WardrobeTest extends TestCase
         })->call($assets);
 
         $this->assertFalse($staleNextRequest, 'A theme just built is stale again on the next request');
+    }
+
+    /**
+     * 🚨 Seen on dev, the showcase and live on 2026-10-25:
+     * `millwright:rebuild-assets` rebuilds forum.js and forum.css by
+     * committing them directly, which fires no event, so the theme bundles
+     * kept the old code until someone rebuilt them by hand.
+     */
+    #[Test]
+    public function a_rebuild_of_the_shared_assets_that_fires_no_event_still_reaches_every_theme()
+    {
+        $this->themes();
+        $this->page();
+
+        $container = $this->app()->getContainer();
+        $themeJs = $container->make('flarum.paths')->public.'/assets/forum-theme-'.self::TAGS.'.js';
+        $this->assertStringNotContainsString('wardrobeProbe', (string) file_get_contents($themeJs));
+
+        // An extension's JS changes, and the shared bundle is rebuilt the way
+        // millwright:rebuild-assets does it: commit() and nothing else.
+        $container->extend('flarum.assets.forum', fn ($assets) => $assets->js(
+            fn ($sources) => $sources->addString(fn () => 'window.wardrobeProbe=1;')
+        ));
+        $container->make('flarum.assets.forum')->makeJs()->commit();
+
+        // The next request — a fresh process, so nothing remembered from this one.
+        $this->nextRequest()->jsUrlFor(self::TAGS);
+
+        $this->assertStringContainsString('wardrobeProbe', (string) file_get_contents($themeJs));
+    }
+
+    #[Test]
+    public function a_theme_is_not_rebuilt_while_the_shared_assets_stay_the_same()
+    {
+        $this->themes();
+        $this->page();
+
+        $theme = self::TAGS;
+        $stale = (fn () => $this->isStale($theme))->call($this->nextRequest());
+
+        $this->assertFalse($stale, 'A theme just built is stale again on the next request');
     }
 }

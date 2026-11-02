@@ -43,6 +43,8 @@ class InvalidateThemeAssets
         // worker simply rebuild lazily on first use instead.
         // The bound connection is wrapped for per-job queue routing, so the
         // driver underneath is what decides whether a push is really deferred.
+        // `getDriver()` is RoutingQueue's documented accessor for this, and core's
+        // own QueueServiceProvider unwraps the queue the same way.
         $driver = $this->queue instanceof RoutingQueue ? $this->queue->getDriver() : $this->queue;
 
         if ($driver instanceof SyncQueue) {

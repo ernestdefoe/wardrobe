@@ -5,6 +5,8 @@ namespace Ernestdefoe\Wardrobe;
 use Flarum\Frontend\Document;
 use Flarum\Http\RequestUtil;
 use Psr\Http\Message\ServerRequestInterface;
+use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Serves the actor their chosen theme.
@@ -26,7 +28,8 @@ class ApplyTheme
 {
     public function __construct(
         private ThemeRegistry $registry,
-        private ThemeAssets $assets
+        private ThemeAssets $assets,
+        private LoggerInterface $log
     ) {
     }
 
@@ -50,9 +53,21 @@ class ApplyTheme
 
         $document->extraAttributes['data-wardrobe-theme'] = $chosen;
 
-        $this->swap($document->css, '~/forum\.css(\?|$)~', $this->assets->cssUrlFor($chosen));
+        // 🚨 Building a theme's bundles replays `Assets::$sources` with core's
+        // own callback signature — the one seam core offers for this, and not a
+        // published contract. If a future core changes it, the member keeps the
+        // shared forum.css/forum.js and the error is logged, rather than every
+        // page on the forum answering 500.
+        try {
+            $css = $this->assets->cssUrlFor($chosen);
+            $js = $this->assets->jsUrlFor($chosen);
+        } catch (Throwable $e) {
+            $this->log->error('[wardrobe] Could not build theme '.$chosen.'; serving the shared assets. '.$e->getMessage(), ['exception' => $e]);
 
-        $js = $this->assets->jsUrlFor($chosen);
+            return;
+        }
+
+        $this->swap($document->css, '~/forum\.css(\?|$)~', $css);
 
         $this->swap($document->js, '~/forum\.js(\?|$)~', $js);
 

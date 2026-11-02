@@ -120,6 +120,30 @@ class WardrobeTest extends TestCase
     }
 
     #[Test]
+    public function a_theme_that_cannot_be_built_falls_back_to_the_shared_assets()
+    {
+        $this->themes(default: self::FLAGS);
+        $this->app();
+
+        // Stands in for a core release that changes the asset seam a theme
+        // build replays: the build throws instead of producing a bundle.
+        $this->app()->getContainer()->extend('flarum.assets.factory', fn (callable $factory) => function (string $name) use ($factory) {
+            if (str_starts_with($name, 'forum-theme-')) {
+                throw new \RuntimeException('asset seam changed');
+            }
+
+            return $factory($name);
+        });
+
+        $html = $this->page();
+
+        $this->assertSame(self::FLAGS, $this->active($html), 'The choice still stands');
+        $this->assertMatchesRegularExpression('#href="[^"]*/assets/forum\.css#', $html);
+        $this->assertMatchesRegularExpression('#src="[^"]*/assets/forum\.js#', $html);
+        $this->assertDoesNotMatchRegularExpression('#/assets/forum-theme-#', $html);
+    }
+
+    #[Test]
     public function a_theme_that_is_not_enabled_is_never_offered()
     {
         $this->themes([self::TAGS, 'acme-not-installed']);

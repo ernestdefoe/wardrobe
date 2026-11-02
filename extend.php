@@ -33,6 +33,10 @@ return [
      * anything that is not a configured theme into '' as well — so a
      * hand-written API call cannot park someone on a theme the owner has not
      * offered.
+     *
+     * `resolve()` is deliberate: `registerPreference()` takes a plain callable
+     * and extend.php has no container, so the closure looks the registry up
+     * lazily, when a preference is actually written.
      */
     (new Extend\User())
         ->registerPreference(

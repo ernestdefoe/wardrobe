@@ -265,6 +265,8 @@ class ThemeAssets
             return $this->compilers[$themeId] = null;
         }
 
+        // The same container keys core's own Extend\Frontend and Extend\Theme
+        // use (ForumServiceProvider, FrontendServiceProvider).
         /** @var Assets $forum */
         $forum = $this->container->make('flarum.assets.forum');
 

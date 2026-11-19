@@ -6,6 +6,8 @@ use Flarum\Frontend\Event\AssetsRecompiled;
 use Flarum\Queue\RoutingQueue;
 use Illuminate\Contracts\Queue\Queue;
 use Illuminate\Queue\SyncQueue;
+use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Marks every per-theme asset stale when core rebuilds the shared one,
@@ -29,7 +31,8 @@ class InvalidateThemeAssets
 {
     public function __construct(
         private ThemeAssets $assets,
-        private Queue $queue
+        private Queue $queue,
+        private LoggerInterface $log
     ) {
     }
 
@@ -51,6 +54,12 @@ class InvalidateThemeAssets
             return;
         }
 
-        $this->queue->push(new WarmThemeAssets($this->assets->sharedRevision()));
+        // The warm-up is optional (themes still rebuild on first use), so a
+        // queue backend that is down must not fail core's own asset rebuild.
+        try {
+            $this->queue->push(new WarmThemeAssets($this->assets->sharedRevision()));
+        } catch (Throwable $e) {
+            $this->log->warning('[wardrobe] Could not queue the theme warm-up; themes will rebuild on first use. '.$e->getMessage(), ['exception' => $e]);
+        }
     }
 }

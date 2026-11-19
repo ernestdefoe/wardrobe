@@ -4,6 +4,7 @@ import FieldSet from 'flarum/common/components/FieldSet';
 import Select from 'flarum/common/components/Select';
 
 import type ItemList from 'flarum/common/utils/ItemList';
+import type SettingsPage from 'flarum/forum/components/SettingsPage';
 import type Mithril from 'mithril';
 
 import { wardrobe, canChoose, chooseTheme } from './theme';
@@ -27,7 +28,7 @@ export default function addThemePicker(): void {
    * `extend(undefined.prototype, …)` throws inside the initializer — taking the
    * whole forum down on every page, not just the settings page.
    */
-  extend('flarum/forum/components/SettingsPage', 'settingsItems', function (this: any, items: ItemList<Mithril.Children>) {
+  extend('flarum/forum/components/SettingsPage', 'settingsItems', function (this: SettingsPage, items: ItemList<Mithril.Children>) {
     // One theme is not a choice, and a forum that has turned member choice off
     // should show nothing at all rather than a disabled control.
     if (!canChoose()) return;

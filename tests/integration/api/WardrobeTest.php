@@ -2,11 +2,9 @@
 
 namespace Ernestdefoe\Wardrobe\Tests\integration\api;
 
+use Ernestdefoe\Wardrobe\CoreAssetSeam;
 use Ernestdefoe\Wardrobe\ThemeAssets;
 use Ernestdefoe\Wardrobe\ThemeRegistry;
-use Flarum\Frontend\AssetManager;
-use Flarum\Frontend\Assets;
-use Flarum\Frontend\Compiler\Source\SourceCollector;
 use Flarum\Frontend\Compiler\VersionerInterface;
 use Flarum\Frontend\Event\AssetsRecompiled;
 use Flarum\Settings\DatabaseSettingsRepository;
@@ -18,6 +16,8 @@ use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Cache\Repository as Cache;
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Contracts\Queue\Queue;
+use Illuminate\Queue\NullQueue;
 use Laminas\Diactoros\ServerRequest;
 use PHPUnit\Framework\Attributes\Test;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -76,8 +76,7 @@ class WardrobeTest extends TestCase
         $container = $this->app()->getContainer();
 
         return new ThemeAssets(
-            $container,
-            $container->make(AssetManager::class),
+            $container->make(CoreAssetSeam::class),
             $container->make(ThemeRegistry::class),
             $container->make(SettingsRepositoryInterface::class),
             $container->make(Cache::class),
@@ -344,8 +343,7 @@ class WardrobeTest extends TestCase
 
         // A process booted after the change must still see the theme as stale.
         $fresh = new ThemeAssets(
-            $container,
-            $container->make(AssetManager::class),
+            $container->make(CoreAssetSeam::class),
             $container->make(ThemeRegistry::class),
             new DatabaseSettingsRepository($this->database()),
             $container->make(Cache::class),
@@ -392,8 +390,7 @@ class WardrobeTest extends TestCase
         };
 
         $assets = new ThemeAssets(
-            $container,
-            $container->make(AssetManager::class),
+            $container->make(CoreAssetSeam::class),
             $container->make(ThemeRegistry::class),
             $container->make(SettingsRepositoryInterface::class),
             new CacheRepository($store),
@@ -453,38 +450,6 @@ class WardrobeTest extends TestCase
         $this->assertFalse($stale, 'A theme just built is stale again on the next request');
     }
 
-    /**
-     * The two core seams a theme build replays (see ThemeAssets::themeAssets()).
-     * They are not documented extension API, so a core upgrade that changes
-     * either one fails here before it reaches a forum.
-     */
-    #[Test]
-    public function the_core_asset_seams_a_theme_build_relies_on_are_still_there()
-    {
-        $container = $this->app()->getContainer();
-
-        $forum = $container->make(AssetManager::class)->frontend('forum');
-        $this->assertInstanceOf(Assets::class, $forum);
-        $this->assertTrue((new \ReflectionProperty(Assets::class, 'sources'))->isPublic(), 'Assets::$sources is public');
-
-        foreach (['css', 'js'] as $type) {
-            $this->assertIsArray($forum->sources[$type] ?? null, "Assets::\$sources['$type'] is an array");
-            $this->assertNotEmpty($forum->sources[$type]);
-            foreach ($forum->sources[$type] as $callback) {
-                $this->assertIsCallable($callback);
-            }
-        }
-
-        $factory = $container->make('flarum.assets.factory');
-        $this->assertIsCallable($factory);
-        $this->assertInstanceOf(Assets::class, $factory('forum-theme-contract'));
-
-        // A replayed source callback still takes core's (collector, locale) signature.
-        $collected = new SourceCollector();
-        ($forum->sources['css'][0])($collected, null);
-        $this->assertNotEmpty($collected->getSources());
-    }
-
     #[Test]
     public function unset_settings_mean_members_choose_and_plain_flarum_is_not_offered()
     {
@@ -524,5 +489,24 @@ class WardrobeTest extends TestCase
 
         $this->assertLessThan(1.0, $waited, 'The request waited for the lock');
         $this->assertSame($before, $url, 'The copy on disk is served meanwhile');
+    }
+
+    /** The warm-up is optional: a queue that is down must not fail core's rebuild. */
+    #[Test]
+    public function a_queue_that_refuses_the_warm_up_does_not_fail_the_rebuild()
+    {
+        $this->themes();
+        $container = $this->app()->getContainer();
+
+        $container->instance(Queue::class, new class extends NullQueue {
+            public function push($job, $data = '', $queue = null)
+            {
+                throw new \RuntimeException('queue backend down');
+            }
+        });
+
+        $container->make(Dispatcher::class)->dispatch(new AssetsRecompiled());
+
+        $this->assertGreaterThan(0, (float) $this->database()->table('settings')->where('key', 'wardrobe.stale_at')->value('value'));
     }
 }

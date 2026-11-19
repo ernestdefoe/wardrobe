@@ -2,19 +2,15 @@
 
 namespace Ernestdefoe\Wardrobe;
 
-use Flarum\Frontend\AssetManager;
-use Flarum\Frontend\Assets;
 use Flarum\Frontend\Compiler\CompilerInterface;
 use Flarum\Frontend\Compiler\Source\FileSource;
 use Flarum\Frontend\Compiler\Source\SourceCollector;
 use Flarum\Frontend\Compiler\Source\SourceInterface;
-use Flarum\Frontend\Compiler\Source\StringSource;
 use Flarum\Frontend\Compiler\VersionerInterface;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Contracts\Cache\Repository as Cache;
-use Illuminate\Contracts\Container\Container;
 
 /**
  * One compiled stylesheet AND one compiled script per theme.
@@ -39,11 +35,9 @@ use Illuminate\Contracts\Container\Container;
  *    overrides and custom functions that `Extend\Theme` decorates the factory
  *    with, so themes that override core LESS files keep working.
  *
- * Those last two are core seams rather than documented extension API, so they
- * are touched in ONE method, {@see themeAssets()}, and
- * `CoreAssetsContractTest` pins their shape: a core upgrade that changes them
- * fails that test before it reaches a forum. In production a change is caught
- * by ApplyTheme, which logs it and serves the shared assets.
+ * Those are core seams rather than documented extension API, so this class
+ * never touches them itself: {@see CoreAssetSeam} does, in one place, and
+ * `CoreAssetsContractTest` pins them.
  *
  * ## The hot path
  *
@@ -76,8 +70,7 @@ class ThemeAssets
     private ?string $shared = null;
 
     public function __construct(
-        private Container $container,
-        private AssetManager $assetManager,
+        private CoreAssetSeam $seam,
         private ThemeRegistry $registry,
         private SettingsRepositoryInterface $settings,
         private Cache $cache,
@@ -284,12 +277,13 @@ class ThemeAssets
             return $this->compilers[$themeId] = null;
         }
 
-        [$assets, $forumSources] = $this->themeAssets('forum-theme-'.preg_replace('/[^a-z0-9]+/i', '-', $themeId));
+        $assets = $this->seam->emptyAssets('forum-theme-'.preg_replace('/[^a-z0-9]+/i', '-', $themeId));
 
         $excluded = $this->excludedFor($themeId);
 
-        $assets->css(fn (SourceCollector $out) => $this->replayCss($out, $forumSources['css'], $excluded));
-        $assets->js(fn (SourceCollector $out) => $this->replayJs($out, $forumSources['js'], $excluded));
+        // Lazy: the forum's sources are only collected when a build compiles.
+        $assets->css(fn (SourceCollector $out) => $this->replayCss($out, $excluded));
+        $assets->js(fn (SourceCollector $out) => $this->replayJs($out, $excluded));
 
         return $this->compilers[$themeId] = [
             'css' => $assets->makeCss(),
@@ -298,44 +292,15 @@ class ThemeAssets
     }
 
     /**
-     * The only place Wardrobe reaches into core's asset internals.
-     *
-     * Returns an empty Assets set named for the theme, built by
-     * `flarum.assets.factory` (the binding core's own Extend\Frontend and
-     * Extend\Theme use, so Theme's LESS overrides and custom functions apply),
-     * and the forum's CSS and JS source callbacks to replay into it.
-     *
-     * The factory seeds its own base CSS, but the forum's source list already
-     * includes that base, so the new set starts empty rather than compiling
-     * variables.less twice.
-     *
-     * @return array{0: Assets, 1: array{css: callable[], js: callable[]}}
-     */
-    private function themeAssets(string $name): array
-    {
-        $forum = $this->assetManager->frontend('forum');
-
-        /** @var Assets $assets */
-        $assets = $this->container->make('flarum.assets.factory')($name);
-        $assets->sources = ['css' => [], 'js' => []] + $assets->sources;
-
-        return [$assets, ['css' => $forum->sources['css'], 'js' => $forum->sources['js']]];
-    }
-
-    /**
      * CSS is attributed per source, because one callback — core's — contributes
      * files that belong to no extension at all.
      *
-     * @param callable[] $callbacks
      * @param string[] $excluded
      */
-    private function replayCss(SourceCollector $out, array $callbacks, array $excluded): void
+    private function replayCss(SourceCollector $out, array $excluded): void
     {
-        foreach ($callbacks as $callback) {
-            $collected = new SourceCollector();
-            $callback($collected, null);
-
-            foreach ($collected->getSources() as $source) {
+        foreach ($this->seam->forumSources('css') as $sources) {
+            foreach ($sources as $source) {
                 $owner = $source instanceof FileSource ? $source->getExtensionId() : null;
 
                 if ($owner !== null && in_array($owner, $excluded, true)) {
@@ -354,18 +319,12 @@ class ThemeAssets
      * carries the id. Each callback belongs to exactly one extension, so the
      * whole group lives or dies together.
      *
-     * @param callable[] $callbacks
      * @param string[] $excluded
      */
-    private function replayJs(SourceCollector $out, array $callbacks, array $excluded): void
+    private function replayJs(SourceCollector $out, array $excluded): void
     {
-        foreach ($callbacks as $callback) {
-            $collected = new SourceCollector();
-            $callback($collected, null);
-
-            $sources = $collected->getSources();
-
-            if (in_array($this->ownerOfJs($sources), $excluded, true)) {
+        foreach ($this->seam->forumSources('js') as $sources) {
+            if (in_array($this->seam->jsOwner($sources), $excluded, true)) {
                 continue;
             }
 
@@ -373,22 +332,6 @@ class ThemeAssets
                 $this->reAdd($out, $source, null);
             }
         }
-    }
-
-    /** @param SourceInterface[] $sources */
-    private function ownerOfJs(array $sources): ?string
-    {
-        foreach ($sources as $source) {
-            if (! $source instanceof StringSource) {
-                continue;
-            }
-
-            if (preg_match("/flarum\.extensions\['([^']+)'\]/", $source->getContent(), $matches)) {
-                return $matches[1];
-            }
-        }
-
-        return null;
     }
 
     private function reAdd(SourceCollector $out, SourceInterface $source, ?string $owner): void

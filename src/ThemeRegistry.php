@@ -141,13 +141,14 @@ class ThemeRegistry
         return $this->ids()[0] ?? null;
     }
 
+    /**
+     * Defaults to yes (registered in extend.php): a forum that installs this
+     * extension wants members choosing; an owner who wants one enforced look
+     * turns it off.
+     */
     public function allowsUserChoice(): bool
     {
-        $value = $this->settings->get(self::ALLOW_USER_CHOICE);
-
-        // Unset means yes. A forum that installs this extension wants members
-        // choosing; an owner who wants one enforced look turns it off.
-        return $value === null || (bool) $value;
+        return (bool) $this->settings->get(self::ALLOW_USER_CHOICE);
     }
 
     /**

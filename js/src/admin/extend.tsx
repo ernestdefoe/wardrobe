@@ -1,14 +1,14 @@
 import Admin from 'flarum/common/extenders/Admin';
 
+import type ExtensionPage from 'flarum/admin/components/ExtensionPage';
+
 import WardrobeSettings from './WardrobeSettings';
 
 /**
  * Wardrobe's admin settings.
  *
- * These live in an Admin extender rather than inside `app.initializers.add`
- * because `app.extensionData` is registered by a core admin initializer that
- * may not have run when ours fires — the extender pipeline runs at a point in
- * the boot sequence where that ordering hazard does not exist.
+ * Registered with the Admin extender, Flarum 2's declarative way to add
+ * extension settings.
  *
  * `customSetting`, not `setting`: core calls an object-form setting's callback
  * once at beforeMount, which would freeze the default-theme dropdown's options
@@ -17,7 +17,7 @@ import WardrobeSettings from './WardrobeSettings';
  * the page's own Save button.
  */
 export default [
-  new Admin().customSetting(function () {
+  new Admin().customSetting(function (this: ExtensionPage) {
     return <WardrobeSettings page={this} />;
   }),
 ];

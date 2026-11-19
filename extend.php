@@ -37,13 +37,23 @@ return [
      * `resolve()` is deliberate: `registerPreference()` takes a plain callable
      * and extend.php has no container, so the closure looks the registry up
      * lazily, when a preference is actually written.
+     *
+     * The key is a literal (ThemeRegistry::PREFERENCE) because reading a class
+     * constant here would autoload the class while extend.php loads, which
+     * fatals every request during a deploy that is still updating composer.
      */
     (new Extend\User())
         ->registerPreference(
-            ThemeRegistry::PREFERENCE,
+            'wardrobeTheme',
             fn ($value) => resolve(ThemeRegistry::class)->validPreference($value),
             ''
         ),
+
+    // Unset means: members may choose, and plain Flarum is not offered.
+    // Literal keys for the same autoload reason as above (ThemeRegistry::ALLOW_USER_CHOICE, ::OFFER_FLARUM).
+    (new Extend\Settings())
+        ->default('wardrobe.allow_user_choice', '1')
+        ->default('wardrobe.offer_flarum', '0'),
 
     // Core only rebuilds the asset sets it knows about, so the theme
     // stylesheets must be marked stale whenever the shared one is rebuilt.

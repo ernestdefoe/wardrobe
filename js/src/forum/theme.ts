@@ -2,6 +2,18 @@ import app from 'flarum/forum/app';
 
 export const COOKIE = 'wardrobe_theme';
 
+export interface WardrobeTheme {
+  id: string;
+  title: string;
+}
+
+export interface WardrobeData {
+  themes: WardrobeTheme[];
+  active: string | null;
+  default: string | null;
+  allowUserChoice: boolean;
+}
+
 /**
  * Everything the forum frontend knows about themes, put there by ApplyTheme.
  *
@@ -9,25 +21,27 @@ export const COOKIE = 'wardrobe_theme';
  * needs each theme's own title, and `app.data.extensions` — where titles live —
  * is an admin-only payload.
  */
-export function wardrobe() {
-  return app.data.wardrobe || { themes: [], active: null, default: null, allowUserChoice: true };
+export function wardrobe(): WardrobeData {
+  return (app.data as { wardrobe?: WardrobeData }).wardrobe || { themes: [], active: null, default: null, allowUserChoice: true };
 }
 
 /** Whether to offer a choice at all: one theme is not a choice. */
-export function canChoose() {
+export function canChoose(): boolean {
   const data = wardrobe();
 
   return data.allowUserChoice && data.themes.length > 1;
 }
 
 /**
- * Switch theme, for members and guests alike.
+ * Switch theme, for members and guests alike. Both pickers (the header
+ * switcher and the settings page) call this.
  *
  * A member's choice is a stored preference, so it follows them to every device
- * they sign in on. A guest has nowhere to store a preference, so their choice
- * is a cookie — which the server reads on the next request, exactly like the
- * preference, and which therefore produces a properly themed page rather than
- * one repainted after boot.
+ * they sign in on. '' is a real value: "follow the forum's default". A guest
+ * has nowhere to store a preference, so their choice is a cookie — which the
+ * server reads on the next request, exactly like the preference, and which
+ * therefore produces a properly themed page rather than one repainted after
+ * boot.
  *
  * 🚨 The cookie is only ever written when a guest actually picks something. A
  * guest who never touches this sends no cookie, so their HTML is identical to
@@ -40,7 +54,7 @@ export function canChoose() {
  * would repaint the colours over components that belong to the theme being left
  * behind.
  */
-export function chooseTheme(themeId) {
+export function chooseTheme(themeId: string): void {
   const user = app.session.user;
 
   if (!user) {
@@ -58,7 +72,7 @@ export function chooseTheme(themeId) {
     });
 }
 
-function writeCookie(themeId) {
+function writeCookie(themeId: string): void {
   const year = 60 * 60 * 24 * 365;
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
 

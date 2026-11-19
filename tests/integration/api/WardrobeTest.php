@@ -4,6 +4,9 @@ namespace Ernestdefoe\Wardrobe\Tests\integration\api;
 
 use Ernestdefoe\Wardrobe\ThemeAssets;
 use Ernestdefoe\Wardrobe\ThemeRegistry;
+use Flarum\Frontend\AssetManager;
+use Flarum\Frontend\Assets;
+use Flarum\Frontend\Compiler\Source\SourceCollector;
 use Flarum\Frontend\Compiler\VersionerInterface;
 use Flarum\Frontend\Event\AssetsRecompiled;
 use Flarum\Settings\DatabaseSettingsRepository;
@@ -74,6 +77,7 @@ class WardrobeTest extends TestCase
 
         return new ThemeAssets(
             $container,
+            $container->make(AssetManager::class),
             $container->make(ThemeRegistry::class),
             $container->make(SettingsRepositoryInterface::class),
             $container->make(Cache::class),
@@ -341,6 +345,7 @@ class WardrobeTest extends TestCase
         // A process booted after the change must still see the theme as stale.
         $fresh = new ThemeAssets(
             $container,
+            $container->make(AssetManager::class),
             $container->make(ThemeRegistry::class),
             new DatabaseSettingsRepository($this->database()),
             $container->make(Cache::class),
@@ -388,6 +393,7 @@ class WardrobeTest extends TestCase
 
         $assets = new ThemeAssets(
             $container,
+            $container->make(AssetManager::class),
             $container->make(ThemeRegistry::class),
             $container->make(SettingsRepositoryInterface::class),
             new CacheRepository($store),
@@ -445,5 +451,78 @@ class WardrobeTest extends TestCase
         $stale = (fn () => $this->isStale($theme))->call($this->nextRequest());
 
         $this->assertFalse($stale, 'A theme just built is stale again on the next request');
+    }
+
+    /**
+     * The two core seams a theme build replays (see ThemeAssets::themeAssets()).
+     * They are not documented extension API, so a core upgrade that changes
+     * either one fails here before it reaches a forum.
+     */
+    #[Test]
+    public function the_core_asset_seams_a_theme_build_relies_on_are_still_there()
+    {
+        $container = $this->app()->getContainer();
+
+        $forum = $container->make(AssetManager::class)->frontend('forum');
+        $this->assertInstanceOf(Assets::class, $forum);
+        $this->assertTrue((new \ReflectionProperty(Assets::class, 'sources'))->isPublic(), 'Assets::$sources is public');
+
+        foreach (['css', 'js'] as $type) {
+            $this->assertIsArray($forum->sources[$type] ?? null, "Assets::\$sources['$type'] is an array");
+            $this->assertNotEmpty($forum->sources[$type]);
+            foreach ($forum->sources[$type] as $callback) {
+                $this->assertIsCallable($callback);
+            }
+        }
+
+        $factory = $container->make('flarum.assets.factory');
+        $this->assertIsCallable($factory);
+        $this->assertInstanceOf(Assets::class, $factory('forum-theme-contract'));
+
+        // A replayed source callback still takes core's (collector, locale) signature.
+        $collected = new SourceCollector();
+        ($forum->sources['css'][0])($collected, null);
+        $this->assertNotEmpty($collected->getSources());
+    }
+
+    #[Test]
+    public function unset_settings_mean_members_choose_and_plain_flarum_is_not_offered()
+    {
+        $registry = $this->app()->getContainer()->make(ThemeRegistry::class);
+
+        $this->assertTrue($registry->allowsUserChoice());
+        $this->assertFalse($registry->offersFlarum());
+
+        $this->liveSetting('wardrobe.allow_user_choice', '0');
+        $this->assertFalse($this->app()->getContainer()->make(ThemeRegistry::class)->allowsUserChoice());
+    }
+
+    /**
+     * A page request never waits on another process's build: it serves what
+     * is already on disk at once rather than holding a PHP worker.
+     */
+    #[Test]
+    public function a_page_request_does_not_wait_for_a_build_another_process_holds()
+    {
+        $this->themes();
+        $this->page();
+
+        $before = $this->nextRequest()->cssUrlFor(self::TAGS);
+        $this->liveSetting('wardrobe.stale_at', sprintf('%.6F', microtime(true) + 60));
+
+        $container = $this->app()->getContainer();
+        $lock = $container->make(Cache::class)->lock('wardrobe.build.'.self::TAGS, 60);
+        $this->assertTrue($lock->get(), 'Stands in for another process mid-build');
+
+        try {
+            $started = microtime(true);
+            $url = $this->nextRequest()->cssUrlFor(self::TAGS);
+            $waited = microtime(true) - $started;
+        } finally {
+            $lock->release();
+        }
+
+        $this->assertLessThan(1.0, $waited, 'The request waited for the lock');
+        $this->assertSame($before, $url, 'The copy on disk is served meanwhile');
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Ernestdefoe\Wardrobe;
 
+use Flarum\Frontend\AssetManager;
 use Flarum\Frontend\Assets;
 use Flarum\Frontend\Compiler\CompilerInterface;
 use Flarum\Frontend\Compiler\Source\FileSource;
@@ -38,6 +39,12 @@ use Illuminate\Contracts\Container\Container;
  *    overrides and custom functions that `Extend\Theme` decorates the factory
  *    with, so themes that override core LESS files keep working.
  *
+ * Those last two are core seams rather than documented extension API, so they
+ * are touched in ONE method, {@see themeAssets()}, and
+ * `CoreAssetsContractTest` pins their shape: a core upgrade that changes them
+ * fails that test before it reaches a forum. In production a change is caught
+ * by ApplyTheme, which logs it and serves the shared assets.
+ *
  * ## The hot path
  *
  * Building the compilers is all closures: `Assets::css()` appends a callback,
@@ -70,6 +77,7 @@ class ThemeAssets
 
     public function __construct(
         private Container $container,
+        private AssetManager $assetManager,
         private ThemeRegistry $registry,
         private SettingsRepositoryInterface $settings,
         private Cache $cache,
@@ -121,7 +129,8 @@ class ThemeAssets
             }
 
             if ($compilers = $this->compilersFor($themeId)) {
-                $this->rebuild($themeId, $compilers);
+                // A queue worker may wait for a page request's build to finish.
+                $this->rebuild($themeId, $compilers, wait: true);
             }
         }
     }
@@ -212,13 +221,14 @@ class ThemeAssets
      * straight after a rebuild produces one compile rather than one per
      * request.
      *
-     * If the lock can't be taken in time, what is already on disk is served: one
-     * rebuild behind for a few seconds, which is invisible next to blocking the
-     * request.
+     * A page request never waits for the lock: if another process is already
+     * building this theme, what is on disk is served (one rebuild behind for a
+     * few seconds) rather than holding a PHP worker. Only the queued warm-up,
+     * which has no visitor waiting on it, waits.
      *
      * @param array{css: CompilerInterface, js: CompilerInterface} $compilers
      */
-    private function rebuild(string $themeId, array $compilers): void
+    private function rebuild(string $themeId, array $compilers, bool $wait = false): void
     {
         if (! $this->cache->getStore() instanceof LockProvider) {
             $this->commit($themeId, $compilers);
@@ -226,14 +236,23 @@ class ThemeAssets
             return;
         }
 
+        $build = function () use ($themeId, $compilers) {
+            // Another process may have finished while we waited for the lock.
+            if ($this->isStale($themeId)) {
+                $this->commit($themeId, $compilers);
+            }
+        };
+
+        $lock = $this->cache->lock('wardrobe.build.'.$themeId, 60);
+
         try {
-            $this->cache->lock('wardrobe.build.'.$themeId, 60)->block(5, function () use ($themeId, $compilers) {
-                // Another process may have finished while we waited.
-                if ($this->isStale($themeId)) {
-                    $this->commit($themeId, $compilers);
-                }
-            });
+            $built = $wait ? $lock->block(5, $build) : $lock->get($build);
         } catch (LockTimeoutException) {
+            $built = false;
+        }
+
+        if ($built === false) {
+            // Someone else holds the build: serve what is on disk this request.
             $this->fresh[$themeId] = true;
         }
     }
@@ -265,27 +284,12 @@ class ThemeAssets
             return $this->compilers[$themeId] = null;
         }
 
-        // The same container keys core's own Extend\Frontend and Extend\Theme
-        // use (ForumServiceProvider, FrontendServiceProvider).
-        /** @var Assets $forum */
-        $forum = $this->container->make('flarum.assets.forum');
-
-        /** @var callable $factory */
-        $factory = $this->container->make('flarum.assets.factory');
-
-        /** @var Assets $assets */
-        $assets = $factory('forum-theme-'.preg_replace('/[^a-z0-9]+/i', '-', $themeId));
-
-        // The factory seeds its own base CSS. We want an exact replay of the
-        // forum's own source list instead — which already includes that base —
-        // so start from empty rather than compiling variables.less twice.
-        $assets->sources['css'] = [];
-        $assets->sources['js'] = [];
+        [$assets, $forumSources] = $this->themeAssets('forum-theme-'.preg_replace('/[^a-z0-9]+/i', '-', $themeId));
 
         $excluded = $this->excludedFor($themeId);
 
-        $assets->css(fn (SourceCollector $out) => $this->replayCss($out, $forum, $excluded));
-        $assets->js(fn (SourceCollector $out) => $this->replayJs($out, $forum, $excluded));
+        $assets->css(fn (SourceCollector $out) => $this->replayCss($out, $forumSources['css'], $excluded));
+        $assets->js(fn (SourceCollector $out) => $this->replayJs($out, $forumSources['js'], $excluded));
 
         return $this->compilers[$themeId] = [
             'css' => $assets->makeCss(),
@@ -294,14 +298,40 @@ class ThemeAssets
     }
 
     /**
+     * The only place Wardrobe reaches into core's asset internals.
+     *
+     * Returns an empty Assets set named for the theme, built by
+     * `flarum.assets.factory` (the binding core's own Extend\Frontend and
+     * Extend\Theme use, so Theme's LESS overrides and custom functions apply),
+     * and the forum's CSS and JS source callbacks to replay into it.
+     *
+     * The factory seeds its own base CSS, but the forum's source list already
+     * includes that base, so the new set starts empty rather than compiling
+     * variables.less twice.
+     *
+     * @return array{0: Assets, 1: array{css: callable[], js: callable[]}}
+     */
+    private function themeAssets(string $name): array
+    {
+        $forum = $this->assetManager->frontend('forum');
+
+        /** @var Assets $assets */
+        $assets = $this->container->make('flarum.assets.factory')($name);
+        $assets->sources = ['css' => [], 'js' => []] + $assets->sources;
+
+        return [$assets, ['css' => $forum->sources['css'], 'js' => $forum->sources['js']]];
+    }
+
+    /**
      * CSS is attributed per source, because one callback — core's — contributes
      * files that belong to no extension at all.
      *
+     * @param callable[] $callbacks
      * @param string[] $excluded
      */
-    private function replayCss(SourceCollector $out, Assets $forum, array $excluded): void
+    private function replayCss(SourceCollector $out, array $callbacks, array $excluded): void
     {
-        foreach ($forum->sources['css'] as $callback) {
+        foreach ($callbacks as $callback) {
             $collected = new SourceCollector();
             $callback($collected, null);
 
@@ -324,11 +354,12 @@ class ThemeAssets
      * carries the id. Each callback belongs to exactly one extension, so the
      * whole group lives or dies together.
      *
+     * @param callable[] $callbacks
      * @param string[] $excluded
      */
-    private function replayJs(SourceCollector $out, Assets $forum, array $excluded): void
+    private function replayJs(SourceCollector $out, array $callbacks, array $excluded): void
     {
-        foreach ($forum->sources['js'] as $callback) {
+        foreach ($callbacks as $callback) {
             $collected = new SourceCollector();
             $callback($collected, null);
 

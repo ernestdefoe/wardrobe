@@ -16,7 +16,7 @@ import { wardrobe, chooseTheme } from '../theme';
 export default class ThemeSwitcher extends Component {
   view() {
     const { themes, active } = wardrobe();
-    const tr = (key) => app.translator.trans(`ernestdefoe-wardrobe.forum.switcher.${key}`);
+    const tr = (key: string) => app.translator.trans(`ernestdefoe-wardrobe.forum.switcher.${key}`);
 
     return (
       <Dropdown

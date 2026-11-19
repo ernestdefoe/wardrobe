@@ -1,5 +1,7 @@
 import app from 'flarum/admin/app';
 import Component from 'flarum/common/Component';
+import type { ComponentAttrs } from 'flarum/common/Component';
+import type Mithril from 'mithril';
 import Switch from 'flarum/common/components/Switch';
 import Select from 'flarum/common/components/Select';
 import isExtensionEnabled from 'flarum/admin/utils/isExtensionEnabled';
@@ -14,7 +16,7 @@ const FLARUM = 'flarum';
 
 const SELF = 'ernestdefoe-wardrobe';
 
-const t = (key, params) => app.translator.trans(`ernestdefoe-wardrobe.admin.settings.${key}`, params);
+const t = (key: string) => app.translator.trans(`ernestdefoe-wardrobe.admin.settings.${key}`);
 
 /**
  * Wardrobe's whole settings page.
@@ -25,7 +27,21 @@ const t = (key, params) => app.translator.trans(`ernestdefoe-wardrobe.admin.sett
  * once, at `beforeMount` — its options would be frozen at boot, so the dropdown
  * would offer yesterday's themes. A custom setting is called on every render.
  */
-export default class WardrobeSettings extends Component {
+// The ExtensionPage that renders this, as far as this component uses it.
+interface SettingsPage {
+  setting(key: string): (value?: string) => string | undefined;
+}
+
+interface Extension {
+  id: string;
+  extra: { 'flarum-extension'?: { title?: string; category?: string } };
+}
+
+interface WardrobeSettingsAttrs extends ComponentAttrs {
+  page: SettingsPage;
+}
+
+export default class WardrobeSettings extends Component<WardrobeSettingsAttrs> {
   view() {
     const page = this.attrs.page;
     const installed = installedThemes();
@@ -46,7 +62,7 @@ export default class WardrobeSettings extends Component {
 
         {chosen.length > 0 ? (
           <div className="Form-group">
-            <Switch state={offersFlarum(page)} onchange={(value) => toggleFlarum(page, value)}>
+            <Switch state={offersFlarum(page)} onchange={(value: boolean) => toggleFlarum(page, value)}>
               {t('offer_flarum_label')}
             </Switch>
             <div className="helpText">{t('offer_flarum_help')}</div>
@@ -60,13 +76,13 @@ export default class WardrobeSettings extends Component {
             <Select
               value={defaultTheme(page, choices)}
               options={Object.fromEntries(choices.map((id) => [id, titleOf(id)]))}
-              onchange={(value) => page.setting(DEFAULT)(value)}
+              onchange={(value: string) => page.setting(DEFAULT)(value)}
             />
           </div>
         ) : null}
 
         <div className="Form-group">
-          <Switch state={allowsUserChoice(page)} onchange={(value) => page.setting(ALLOW)(value ? '1' : '0')}>
+          <Switch state={allowsUserChoice(page)} onchange={(value: boolean) => page.setting(ALLOW)(value ? '1' : '0')}>
             {t('allow_user_choice_label')}
           </Switch>
           <div className="helpText">{t('allow_user_choice_help')}</div>
@@ -75,13 +91,13 @@ export default class WardrobeSettings extends Component {
     );
   }
 
-  themeSwitch(page, extension, chosen) {
+  themeSwitch(page: SettingsPage, extension: Extension, chosen: string[]) {
     const on = chosen.includes(extension.id);
 
     return (
       <div className="WardrobeSettings-theme" key={extension.id}>
         <Switch state={on} onchange={() => toggleTheme(page, extension.id, !on)}>
-          {extension.extra['flarum-extension'].title || extension.id}
+          {extension.extra['flarum-extension']?.title || extension.id}
         </Switch>
       </div>
     );
@@ -97,42 +113,43 @@ export default class WardrobeSettings extends Component {
  * declare its category simply will not appear, which is the right pressure: the
  * fix belongs in that theme's composer.json.
  */
-function installedThemes() {
-  return Object.values(app.data.extensions || {})
+function installedThemes(): Extension[] {
+  return (Object.values(app.data.extensions || {}) as Extension[])
     .filter((extension) => extension.id !== SELF)
     .filter((extension) => extension.extra?.['flarum-extension']?.category === 'theme')
     .filter((extension) => isExtensionEnabled(extension.id))
-    .sort((a, b) => (a.extra['flarum-extension'].title || a.id).localeCompare(b.extra['flarum-extension'].title || b.id));
+    .sort((a, b) => (a.extra['flarum-extension']?.title || a.id).localeCompare(b.extra['flarum-extension']?.title || b.id));
 }
 
-function chosenThemes(page) {
+function chosenThemes(page: SettingsPage): string[] {
   try {
     const parsed = JSON.parse(page.setting(THEMES)() || '[]');
 
     return Array.isArray(parsed) ? parsed : [];
-  } catch (e) {
+  } catch {
     // A hand-edited settings row should not take the admin page down with it.
     return [];
   }
 }
 
 /** Matches ThemeRegistry::choices(): plain Flarum only alongside real themes. */
-function choicesOf(page, chosen) {
+function choicesOf(page: SettingsPage, chosen: string[]): string[] {
   return chosen.length && offersFlarum(page) ? [...chosen, FLARUM] : chosen;
 }
 
-function offersFlarum(page) {
-  return !!Number(page.setting(OFFER_FLARUM)() || 0);
+// The default ('0') is registered in extend.php and arrives in app.data.settings.
+function offersFlarum(page: SettingsPage): boolean {
+  return !!Number(page.setting(OFFER_FLARUM)());
 }
 
-function toggleTheme(page, id, on) {
+function toggleTheme(page: SettingsPage, id: string, on: boolean): void {
   const next = on ? [...chosenThemes(page), id] : chosenThemes(page).filter((existing) => existing !== id);
 
   page.setting(THEMES)(JSON.stringify(next));
   keepDefaultReal(page);
 }
 
-function toggleFlarum(page, on) {
+function toggleFlarum(page: SettingsPage, on: boolean): void {
   page.setting(OFFER_FLARUM)(on ? '1' : '0');
   keepDefaultReal(page);
 }
@@ -140,31 +157,30 @@ function toggleFlarum(page, on) {
 // Untick whatever was the default and the stored default is dangling. Point it
 // at something real so the dropdown never shows an empty selection and the
 // forum never falls back to the shared stylesheet by accident.
-function keepDefaultReal(page) {
+function keepDefaultReal(page: SettingsPage): void {
   const choices = choicesOf(page, chosenThemes(page));
 
-  if (!choices.includes(page.setting(DEFAULT)())) {
+  if (!choices.includes(page.setting(DEFAULT)() ?? '')) {
     page.setting(DEFAULT)(choices[0] ?? '');
   }
 }
 
-function defaultTheme(page, choices) {
-  const stored = page.setting(DEFAULT)();
+function defaultTheme(page: SettingsPage, choices: string[]): string {
+  const stored = page.setting(DEFAULT)() ?? '';
 
   return choices.includes(stored) ? stored : choices[0];
 }
 
-/** Unset means yes — matching ThemeRegistry::allowsUserChoice(). */
-function allowsUserChoice(page) {
-  const value = page.setting(ALLOW)();
-
-  return value === '' || value === null || value === undefined ? true : !!Number(value);
+// The default ('1': members may choose) is registered in extend.php and
+// arrives in app.data.settings.
+function allowsUserChoice(page: SettingsPage): boolean {
+  return !!Number(page.setting(ALLOW)());
 }
 
-function titleOf(id) {
+function titleOf(id: string): Mithril.Children {
   if (id === FLARUM) return t('flarum_title');
 
-  const extension = app.data.extensions?.[id];
+  const extension = (app.data.extensions as Record<string, Extension> | undefined)?.[id];
 
   return extension?.extra?.['flarum-extension']?.title || id;
 }
